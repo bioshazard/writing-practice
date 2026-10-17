@@ -2,9 +2,9 @@
   'use strict';
   const $=id=>document.getElementById(id), key='little-letters-v1', SVG='http://www.w3.org/2000/svg';
   const id=()=>globalThis.crypto?.randomUUID?.() || Date.now().toString(36)+Math.random().toString(36).slice(2);
-  const defaults=()=>({id:id(),title:'My little letters',text:'Aa Bb Cc\nI can do it.',size:'16',paper:'letter',traces:'1',blanks:'1',guides:'4',style:'dotted',repeat:false,model:true,mono:false});
+  const defaults=()=>({id:id(),title:'My little letters',text:'Aa Bb Cc\nI can do it.',size:'16',paper:'letter',traces:'1',blanks:'1',guides:'4',style:'dotted',repeat:false,model:true,mono:false,startDots:false});
   const options={size:['12','16','22','28'],paper:['letter','A4'],traces:['1','2','3','4'],blanks:['0','1','2','3'],guides:['0','2','3','4'],style:['dotted','light','solid']};
-  const booleans=['repeat','model','mono'];
+  const booleans=['repeat','model','mono','startDots'];
   function clean(value){
     if(!value || typeof value!=='object' || typeof value.text!=='string')throw Error('Invalid worksheet');
     const sheet=defaults();sheet.title=typeof value.title==='string'?value.title.slice(0,60):sheet.title;sheet.text=value.text.slice(0,3000);
@@ -33,13 +33,13 @@
     if(!sheet.text.trim())return {rows:[],scale,unsupported:[]};
     const normalized=sheet.text.normalize('NFC').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[–—]/g,'-').replace(/\t/g,' ');
     const unsupported=[...new Set([...normalized].filter(c=>!Letters.paths[c]&&!/\s/.test(c)))];
-    for(const phrase of normalized.split('\n')){
-      if(!phrase.trim()){rows.push({text:'',solid:false});continue;}
+    for(const [phraseIndex,phrase] of normalized.split('\n').entries()){
+      if(!phrase.trim()){rows.push({text:'',solid:false,phrase:phraseIndex});continue;}
       const parts=Letters.wrap(phrase,maxWidth);
-      const addRows=solid=>{for(let text of parts){if(sheet.repeat && text && Letters.measure(text+' '+text)<=maxWidth){const original=text;while(Letters.measure(text+' '+original)<=maxWidth)text+=' '+original;}rows.push({text,solid});}};
+      const addRows=solid=>{for(let text of parts){if(sheet.repeat && text && Letters.measure(text+' '+text)<=maxWidth){const original=text;while(Letters.measure(text+' '+original)<=maxWidth)text+=' '+original;}rows.push({text,solid,phrase:phraseIndex});}};
       if(sheet.model)addRows(true);
       for(let i=0;i<Number(sheet.traces);i++)addRows(false);
-      for(let i=0;i<Number(sheet.blanks);i++)rows.push({text:'',solid:false});
+      for(let i=0;i<Number(sheet.blanks);i++)rows.push({text:'',solid:false,phrase:phraseIndex});
     }
     return {rows,scale,unsupported};
   }
@@ -48,7 +48,7 @@
     const layout=rowsFor(sheet,usable),pitch=layout.scale*110,perPage=Math.floor((h-65)/pitch);
     let rows=layout.rows;
     if(!rows.length)rows=Array.from({length:perPage},()=>({text:'',solid:false}));
-    const total=Math.ceil(rows.length/perPage);$('pages').replaceChildren();
+    const pages=WorksheetLayout.paginate(rows,perPage),total=pages.length;$('pages').replaceChildren();
     for(let page=0;page<total;page++){
       const paper=document.createElement('div');paper.className='sheet';paper.style.width='100%';paper.style.maxWidth=w+'mm';paper.style.aspectRatio=`${w} / ${h}`;
       const svg=el('svg',{viewBox:`0 0 ${w} ${h}`,role:'img','aria-label':`${sheet.title||'Writing practice'}, page ${page+1} of ${total}`});
@@ -56,7 +56,7 @@
       svg.append(el('text',{x:margin,y:20,'font-family':'system-ui, sans-serif','font-size':5,'font-weight':650,fill:'#293c33'},sheet.title||'Writing practice'));
       svg.append(el('text',{x:margin,y:29,'font-family':'system-ui, sans-serif','font-size':2.7,fill:'#65736c'},'Name: ____________________________'));
       svg.append(el('text',{x:w-margin,y:29,'text-anchor':'end','font-family':'system-ui, sans-serif','font-size':2.7,fill:'#65736c'},'Date: ______________'));
-      rows.slice(page*perPage,(page+1)*perPage).forEach((row,index)=>{
+      pages[page].forEach((row,index)=>{
         const top=37+index*pitch,s=layout.scale;
         const line=(position,color,dashed=false,weight=.25)=>svg.append(el('line',{x1:margin,y1:top+position*s,x2:w-margin,y2:top+position*s,stroke:sheet.mono?'#777':color,'stroke-width':weight,...(dashed?{'stroke-dasharray':'1.1 1.1'}:{})}));
         if(sheet.guides!=='0'){
@@ -64,7 +64,7 @@
           line(70,'#a67d6f',false,.35);if(sheet.guides==='4')line(90,'#c7cec7');
         }
         const group=el('g',{transform:`translate(${margin+1} ${top}) scale(${s})`,fill:'none',stroke:row.solid||sheet.style==='solid'?'#34483d':sheet.style==='light'?'#b4b4b4':'#858585','stroke-width':sheet.style==='dotted'&&!row.solid?'2.8':'2.2','stroke-linecap':'round','stroke-linejoin':'round'});
-        let x=0;for(const char of row.text){const d=Letters.paths[char];if(d)group.append(el('path',{d,transform:`translate(${x} 0)`,...(!row.solid&&sheet.style==='dotted'?{'stroke-dasharray':'.1 6.2'}:{})}));else if(char!==' '){group.append(el('text',{x,y:70,fill:'#777',stroke:'none','font-size':65,'font-family':'sans-serif'},char));}x+=Letters.advance(char);}
+        let x=0;for(const char of row.text){const d=Letters.paths[char];if(d)group.append(el('path',{d,transform:`translate(${x} 0)`,...(!row.solid&&sheet.style==='dotted'?{'stroke-dasharray':'.1 6.2'}:{})}));else if(char!==' '){group.append(el('text',{x,y:70,fill:'#777',stroke:'none','font-size':65,'font-family':'sans-serif'},char));}if(sheet.startDots){const start=Letters.start(char);if(start)group.append(el('circle',{cx:x+start.x,cy:start.y,r:3.8,fill:sheet.mono?'#333':'#38634c',stroke:'white','stroke-width':1,'data-start-dot':''}));}x+=Letters.advance(char);}
         svg.append(group);
       });
       svg.append(el('text',{x:margin,y:h-10,'font-family':'system-ui, sans-serif','font-size':2.4,fill:'#8a948b'},'little letters · a little practice, a little progress'));
